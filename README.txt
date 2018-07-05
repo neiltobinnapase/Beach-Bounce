@@ -1,4 +1,5 @@
-Neil Tobin Napase - Project 2 (Angry Birds)
+Neil Tobin Napase - Project 2
+Computer Graphics
 
 Features:
 - Textured plane where objects are placed and move
