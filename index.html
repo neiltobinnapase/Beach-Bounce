@@ -1,0 +1,791 @@
+<html charset="UTF-8">
+<meta charset="UTF-8" />
+
+<head>
+<script src="libs/three.js"></script>
+<script src="libs/OrbitControls.js"></script>
+<script src="libs/keyboard.js"></script>
+<script src="libs/physi.js"></script>
+
+<style type="text/css">
+	div.transbox {
+		margin: 30px;
+		background-color: #FFFFFF;
+		border: 6px solid black;
+		opacity: 0.6;
+		filter: alpha(opacity=60);
+
+		position: absolute;
+		bottom: 0;
+		left: 0%;
+		transform: translateX(0%);
+	}
+
+	div.transbox div {
+		width: 230px;
+		text-align: left;
+		position: relative;
+		margin: 3px;
+		font-weight: bold;
+		font-family: Helvetica;
+		color: #000000;
+	}
+
+	div.scorebox {
+		margin: 30px;
+		background-color: #FFFFFF;
+		border: 6px solid black;
+		opacity: 0.6;
+		filter: alpha(opacity=60);
+
+		position: absolute;
+		top: 0;
+		left: 0%;
+		transform: translateX(0%);
+	}
+
+	div.scorebox div {
+		width: 230px;
+		text-align: left;
+		position: relative;
+		margin: 3px;
+		font-size: 20pt;
+		font-weight: bold;
+		font-family: Helvetica;
+		color: #000000;
+	}
+
+	div.scorebox div .red {
+		text-align: right;
+		font-weight: bolder;
+		color: #D50000;
+	}
+</style>
+
+</head>
+
+<body style="margin: 0">
+
+<script>
+	var renderer;
+	var scene;
+	var camera;
+	var hasTargetHitGroundMap = new Map();
+	var hasBallHitGroundMap = new Map();
+	var hasTargetHitBall = new Map();
+	
+	var bounce1, bounce2, bounce3;
+	var boom;
+	var hit1, hit2;
+	var knock1, knock2;
+	var byeball;
+	var byetarget;
+	var September;
+	function loadSounds()
+	{
+		bounce1 = new Audio("sounds/bounce1.mp3");
+		bounce1.volume = .4;
+		bounce2 = new Audio("sounds/bounce2.mp3");
+		bounce2.volume = .4;
+
+		boom = new Audio("sounds/cannon.mp3");
+		boom.volume = .4;
+		hit1 = new Audio("sounds/hit1.mp3");
+		hit1.volume = .6;
+		hit2 = new Audio("sounds/hit2.mp3");
+		hit2.volume = .6;
+
+		knock1 = new Audio("sounds/knock1.mp3");
+		knock1.volume = .4;
+		knock2 = new Audio("sounds/knock2.mp3");
+		knock2.volume = .4;
+
+		byeball = new Audio("sounds/bye.mp3");
+		byeball.volume = .4;
+		byetarget = new Audio("sounds/bye.mp3");
+		byetarget.volume = .4;
+
+		September = new Audio("sounds/september.mp3");
+		September.volume = .5;
+		September.loop = true;
+		September.play();
+	}
+
+	//Loads in beachball texture and 3D font before initializing everything else
+	function init(){
+		var loader = new THREE.TextureLoader();
+		loader.load('images/beachball.jpg', function (texture){
+			targetTexture = texture;
+
+			(new THREE.FontLoader()).load("fonts/Life's a Beach_Medium.json", function (fontfun){
+				beachFont = fontfun;
+				continueInit();
+			});
+		});
+	}
+	
+	//Continues intializing all the objects into the scene
+	function continueInit()
+	{
+		//Allow for Physijs compliant physics-based 3D world
+		Physijs.scripts.worker = './libs/physijs_worker.js';
+		Physijs.scripts.ammo = './ammo.js';
+
+		//Sounds and music are loaded into the game
+		loadSounds();
+		
+		createScene();
+		
+		addRenderer();
+		addCamera();
+		addSpotlight();
+
+		//Creates textured plane where the objects are placed and move
+		createGroundPlane();
+		//Creates other objects that the game can interact with
+		createWalls();
+		createCannonMount();
+		//3D Text on the back wall
+		createBackText();
+		
+		//Object that fires projectiles
+		createCannon();
+		//Creates 9 different targets that are independent objects
+		targetsWithParameters();
+
+		//Parameters used for score and keyboard clicks
+		MusicPlaying = true;
+		currentScore = 0;
+		highScore = 0;
+		
+		//new THREE.OrbitControls(camera, renderer.domElement);
+
+		//Allows for window resize; scene will scale when window size changes
+		window.addEventListener('resize', onResize, false);
+
+		document.body.appendChild( renderer.domElement );		
+		render();
+	}
+	
+	//Render function simulates physics. Will also check for changes
+	//in objects/modes
+	function render()
+	{
+		scene.simulate();
+
+		cameraCheck();
+		checkMusic();
+
+		cannonYMovement();
+		cannonZMovement();
+		ballLaunch();
+		checkBallPosition();
+		followBall();
+
+		reset();
+		
+		requestAnimationFrame( render );
+		renderer.render( scene, camera );
+	}
+
+	
+	function addCamera()
+	{
+		camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 0.1, 1000 );
+		camera.position.set(-300, 0, 100);
+		camera.up = new THREE.Vector3(0, 0, 1);
+		camera.lookAt( scene.position );
+
+		camera.far = 2000;
+	}
+	
+	function addRenderer()
+	{
+		renderer = new THREE.WebGLRenderer({antialias: true});
+		renderer.setClearColor( 0x000000, 1.0 );
+		renderer.setSize( window.innerWidth, window.innerHeight );
+		renderer.shadowMap.enabled = true;
+		renderer.shadowMapSoft = true;
+	}
+	
+	function addSpotlight()
+	{
+		spotLight = new THREE.SpotLight( 0xffffff, 2);
+        spotLight.position.set(-30, 60, 230);
+		spotLight.angle = 1.05;
+		spotLight.distance = 280;
+		spotLight.penumbra = 0;
+		spotLight.decay = 0.5;
+		spotLight.shadow.camera.visible = true;
+        spotLight.shadow.camera.near = 10;
+        spotLight.shadow.camera.far = 100;
+		spotLight.shadow.mapSize.width = 2048;
+		spotLight.shadow.mapSize.height = 2048;
+		spotLight.shadow.camera.right = 10;
+		spotLight.shadow.camera.left = -10;
+		spotLight.shadow.camera.top = 5;
+		spotLight.shadow.camera.bottom = -5;
+
+        spotLight.castShadow = true;
+        scene.add(spotLight);
+		
+		var ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+		scene.add(ambientLight);
+	}
+	
+	function createScene()
+	{
+		scene = new Physijs.Scene({reportsize: 200});
+		scene.setGravity(new THREE.Vector3(0, 0, -50));
+	}
+
+	//Allows for window resize scaling
+	function onResize() 
+	{
+		camera.aspect = window.innerWidth / window.innerHeight;
+		camera.updateProjectionMatrix();
+		renderer.setSize(window.innerWidth, window.innerHeight);
+	}
+
+	//Checks if a certain key was pressed, changing the perspective of
+	//the camera
+	function cameraCheck()
+	{
+		if(Key.isDown(Key._2)){
+			camera.position.set(0, -200, 400);
+			camera.lookAt(scene.position);
+			camera.updateProjectionMatrix();
+			isFollowingBall = false;
+		}
+
+		if(Key.isDown(Key._1)){
+			camera.position.set(-300, 0, 100);
+			camera.lookAt(scene.position);
+			camera.updateProjectionMatrix();
+			isFollowingBall = false;
+		}
+
+		if(Key.isDown(Key._3)){
+			camera.position.set(-230, 0, 80);
+			camera.lookAt(scene.position);
+			camera.updateProjectionMatrix();
+			isFollowingBall = true;
+		}
+	}
+
+	//If key is pressed, toggle the music playing
+	var musicPlaying;
+	function checkMusic()
+	{
+		if(Key.isDown(Key.M)){
+			if(musicPlaying){
+				musicPlaying = false;
+				September.pause();
+			}
+			else{
+				musicPlaying = true;
+				September.play();
+			}
+		}
+	}
+
+	//If certain perspective is active, the camera will follow the ball
+	var isFollowingBall;
+	function followBall()
+	{
+		if(ball != null){
+			if(isFollowingBall){
+				camera.lookAt(ball.position);
+				camera.updateProjectionMatrix();
+			}
+		}
+	}
+	
+	//When key is pressed, objects in the game will reset, as well as the score
+	function reset()
+	{
+		if(Key.isDown(Key.R)){
+
+			for(var i = 0; i < pillarstarget.length; i++){
+				scene.remove(pillarstarget[i]);
+			}
+			scene.remove(cannon);
+
+			if(ballLaunched){
+				ballLaunched = false;
+				scene.remove(ball);
+			}
+
+			pillarstarget = [];
+			currentScore = 0;
+
+			updateScore();
+
+			createCannon();
+			targetsWithParameters();
+		}
+	}
+	
+	//Textured plane where the objects are placed/interact with
+	var groundPlane;
+	function createGroundPlane()
+	{
+		var loader = new THREE.TextureLoader();
+		
+		loader.load('images/sand.jpg', function (texture) {
+			
+			texture.wrapS = THREE.RepeatWrapping;
+			texture.wrapT = THREE.RepeatWrapping;
+			texture.offset.set(0,0);
+			texture.repeat.set(4, 4);
+			
+			var planeMaterial = new Physijs.createMaterial
+			(new THREE.MeshLambertMaterial({map:texture}), 10000, .8);
+		
+		
+			var planeGeometry = new THREE.PlaneGeometry(300, 250, 6);
+		
+			groundPlane = new Physijs.BoxMesh(planeGeometry, planeMaterial, 0);
+		
+			groundPlane.name = "GroundPlane";
+		
+			groundPlane.receiveShadow = true;
+			groundPlane.position.set(0, 0, 0);
+		
+			scene.add(groundPlane);
+		});
+	}
+
+	//Walls surrounding game plane, prevent obects from falling off game plane
+	var wall1, wall2, wall3;
+	function createWalls()
+	{
+		var wallMaterial = new Physijs.createMaterial
+		(new THREE.MeshLambertMaterial({color:0xFEC99A}), .95, .95);
+
+		var wallGeometry = new THREE.BoxGeometry(300, 16, 100);
+		var backGeometry = new THREE.BoxGeometry(16, 224, 100);
+
+		wall1 = new Physijs.BoxMesh(wallGeometry, wallMaterial, 100000);
+		wall2 = new Physijs.BoxMesh(wallGeometry, wallMaterial, 100000);
+		wall3 = new Physijs.BoxMesh(backGeometry, wallMaterial, 100000);
+
+		wall1.position.set(0, 120, 50);
+		wall2.position.set(0, -120, 50);
+		wall3.position.set(142, 0, 50);
+
+		wall1.receiveShadow = true;
+		wall1.castShadow = true;
+		wall2.receiveShadow = true;
+		wall2.castShadow = true;
+		wall3.receiveShadow = true;
+		wall3.castShadow = true;
+
+		wall1.name = "Wall";
+		wall2.name = "Wall";
+		wall3.name = "Wall";
+
+		scene.add(wall1);
+		scene.add(wall2);
+		scene.add(wall3);
+	}
+
+	var cannonMount;
+	function createCannonMount()
+	{
+		var mountMaterial = new Physijs.createMaterial
+		(new THREE.MeshLambertMaterial({color:0xE0F7FA}), .95, .95);
+		var mountGeometry = new THREE.BoxGeometry(32, 224, 16);
+
+		cannonMount = new Physijs.BoxMesh(mountGeometry, mountMaterial, 100000);
+
+		cannonMount.position.set(-133.75, 0, 7.45);
+		cannonMount.castShadow = true;
+		cannonMount.receiveShadow = true;
+
+		scene.add(cannonMount);
+	}
+
+	//3D text placed in the game
+	var beachFont;
+	var randomObject, smileObject;
+	function createBackText()
+	{
+		var randomString = "Have Fun!";
+		var textMaterial = new THREE.MeshLambertMaterial({color:0xFF5FA2});
+		var randomGeometry = new THREE.TextGeometry(randomString, {
+			font: beachFont,
+
+			size: 20,
+			height: 8,
+
+			bevelEnabled: false,
+		});
+
+		randomObject = new THREE.Mesh(randomGeometry, textMaterial);
+		randomObject.rotation.x = Math.PI/2;
+		randomObject.rotation.y = -Math.PI/2;
+		randomObject.position.set(136, 51.5, 70);
+
+		randomObject.castShadow = true;
+		randomObject.receiveShadow = true;
+
+		scene.add(randomObject);
+
+		var smileGeometry = new THREE.TextGeometry(":)", {
+			font: beachFont,
+
+			size: 60,
+			height: 8,
+
+			bevelEnabled: false,
+		});
+
+		smileObject = new THREE.Mesh(smileGeometry, textMaterial);
+		smileObject.rotation.y = Math.PI/2;
+		smileObject.position.set(126, -25, 50);
+
+		smileObject.castShadow = true;
+		smileObject.receiveShadow = true;
+
+		scene.add(smileObject);
+	}
+
+	//Cannon used for determining where the ball will be shot
+	var cannon;
+	function createCannon()
+	{
+		var cylinderGeometry = new THREE.CylinderGeometry(6, 8, 20, 32);
+		var cylinderMaterial = new THREE.MeshLambertMaterial({color: 0xB3E5FC});
+
+		var canhold = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+
+		canhold.position.y = -5;
+		canhold.castShadow = true;
+		canhold.receiveShadow = true;
+
+		scene.add(canhold);
+
+		cannon = new THREE.Object3D();
+		cannon.add(canhold);
+
+		cannon.rotation.z = Math.PI/2;
+		cannon.rotation.y = -(Math.PI/180)*10;
+		cannon.position.x = -130;
+		cannon.position.z = 20;
+		
+
+		cannon.castShadow = true;
+		cannon.receiveShadow = true;
+
+		cannon.name = "Cannon";
+
+		scene.add(cannon);
+	}
+
+	//Controls up and down movement of the cannon, stops when parallel to the ground
+	//or when at a certain angle pointed upwards
+	function cannonYMovement()
+	{
+		if (Key.isDown(Key.W)){
+			cannon.rotation.y -= 0.03;
+			if(cannon.rotation.y < -(Math.PI/3))
+				cannon.rotation.y = -(Math.PI/3);
+		}
+
+		if (Key.isDown(Key.S)){
+			cannon.rotation.y += 0.03;
+			if(cannon.rotation.y > -(Math.PI/180)*10)
+				cannon.rotation.y = -(Math.PI/180)*10;
+		}
+	}
+
+	//Controls left and right movement of the cannon, stops when facing
+	//too far right or too far left
+	function cannonZMovement()
+	{
+		if (Key.isDown(Key.A)){
+			cannon.rotation.z += 0.04;
+			if(cannon.rotation.z > (Math.PI/2) + (Math.PI/180)*50)
+				cannon.rotation.z = (Math.PI/2) + (Math.PI/180)*50;
+		}
+
+		if (Key.isDown(Key.D)){
+			cannon.rotation.z -= 0.04;
+			if (cannon.rotation.z < (Math.PI/180)*40)
+			cannon.rotation.z = (Math.PI/180)*40;
+		}
+	}
+
+	var ball;
+	function createBall()
+	{
+		var ballGeometry = new THREE.SphereGeometry(5, 32, 32);
+		var ballMaterial = Physijs.createMaterial
+			(new THREE.MeshLambertMaterial({color:0xFDD835}), 1000, 1.2);
+		
+		ball = new Physijs.SphereMesh(ballGeometry, ballMaterial, 180);
+		ball.castShadow = true;
+		ball.receiveShadow = true;
+
+		ball.position.x = cannon.position.x + Math.cos((Math.PI/2)-cannon.rotation.z)*10;
+		ball.position.y = cannon.position.y - Math.cos(cannon.rotation.z)*10;
+		ball.position.z = cannon.position.z - Math.sin(cannon.rotation.y)*10;
+
+		ball.name = 'Ball';
+		hasBallHitGroundMap.set(ball, false);
+
+		//Event listener for collisions with ground, pillars, and targets
+		ball.addEventListener('collision', function(o){
+			
+			//If collides with Groundplane, the ball will disappear after 3 seconds
+			if(o.name == 'GroundPlane'){
+				if(!hasBallHitGroundMap.get(ball)){
+					
+					if(Math.round(Math.random()*10) % 2 == 0){
+						bounce1.play();
+					}
+					else{
+						bounce2.play();
+					}
+
+					hasBallHitGroundMap.set(ball, true);
+					
+					setTimeout(function() {
+						scene.remove(ball); 
+						ballLaunched = false; 
+						byeball.play();
+
+					}, 3000);
+				}
+			}
+
+			//If collides with a pillar, sound will play
+			if(o.name == 'Pillar'){
+				
+				if(Math.round(Math.random()*10) % 2 == 0){
+					knock1.play();
+				}
+				else{
+					knock2.play();
+				}
+			}
+
+			//If collides with a wall, sound will play
+			if(o.name == "Wall"){
+				
+				if(Math.round(Math.random()*10) % 2 == 0){
+					knock1.play();
+				}
+				else{
+					knock2.play();
+				}
+			}
+		});
+	}
+
+	//Controls ball launched from cannon. Only one ball is available at a time.
+	var ballLaunched = false;
+	function ballLaunch()
+	{
+		if(!ballLaunched && Key.isDown(Key.F)){
+			createBall();
+			ballLaunched = true;
+			scene.add(ball);
+
+			boom.play();
+			ball.applyCentralImpulse(new THREE.Vector3
+				(9000, - ((Math.PI/2) - cannon.rotation.z) * 6000, 
+				-cannon.rotation.y * 22000));
+		}
+	}
+
+	//Checks if the ball has gotten out of bounds, will remove once it
+	//goes below a certain position
+	function checkBallPosition()
+	{
+		if(ballLaunched && ball.position.z < -10){
+			ballLaunched = false;
+			scene.remove(ball);
+			byeball.play();
+		}
+	}
+
+	//Checks score and sends the data to the scorebox html
+	var currentScore, highScore;
+	function updateScore(){
+		
+		document.querySelector('#score').innerHTML = currentScore;
+		if(highScore <= currentScore){
+			highScore = currentScore;
+			document.querySelector('#highScore').innerHTML = highScore;
+		}
+	}
+
+	//Creates targets and pillars that hold the targets.
+	var pillarstarget;
+	function targetsWithParameters(){
+		pillarstarget = [];
+
+		createTargets(-10, -40, 20);
+		createTargets(-5, 35, 30);
+		createTargets(30, -20, 50);
+		createTargets(35, 85, 20);
+		createTargets(40, -85, 60);
+		createTargets(60, 20, 50);
+		createTargets(75, -60, 80);
+		createTargets(90, 70, 30);
+		createTargets(105, -10, 60);
+	}
+	
+	//Called by targetswithparameters, will create a pillar and target with 
+	//the given x and y coordinates with a height h
+	var targetTexture;
+	function createTargets(x, y, h)
+	{
+		var target;
+		for(var i = 0; i < 4; i++){
+			var pillarGeometry = new THREE.BoxGeometry(6, 6, h);
+			var pillarMaterial = Physijs.createMaterial(new THREE.MeshLambertMaterial({color:0xB3E5FC}), 30, .2);
+
+			var pillar = new Physijs.BoxMesh(pillarGeometry, pillarMaterial, 150);
+
+			switch(i){
+				case 0: pillar.position.set(x-6, y, h/2); break;
+				case 1: pillar.position.set(x, y+6, h/2); break;
+				case 2: pillar.position.set(x+6, y, h/2); break;
+				case 3: pillar.position.set(x, y-6, h/2); break;
+			}
+			
+			pillarstarget.push(pillar);
+			pillar.name = "Pillar";
+
+			pillar.castShadow = true;
+			pillar.receiveShadow = true;
+
+			scene.add(pillar);
+		}
+
+		var targetGeometry = new THREE.SphereGeometry(9, 32, 32);
+		var targetMaterial = Physijs.createMaterial(new THREE.MeshLambertMaterial({map:targetTexture}), .95, .5);
+
+		target = new Physijs.SphereMesh(targetGeometry, targetMaterial, 30);
+
+		target.position.set(x, y , h+8);
+		
+		//Randomly rotates the target on all axes
+		if(Math.round(Math.random()*10) % 2 == 0){
+			target.rotation.x = Math.PI/2;
+		}
+		if(Math.round(Math.random()*10) % 2 == 0){
+			target.rotation.y = Math.PI/2;
+		}		
+		if(Math.round(Math.random()*10) % 2 == 0){
+			target.rotation.z = Math.PI/2;
+		}
+		
+		target.name = "Target";
+		hasTargetHitGroundMap.set(target, false);
+		hasTargetHitBall.set(target, false);
+
+		//Event listener for targets for collision with groundplane or ball
+		target.addEventListener('collision', function(o) {
+
+			//If target hits the ground, remove target and add 100 
+			//to score, then update score
+			if (o.name == 'GroundPlane') {
+				if (!hasTargetHitGroundMap.get(target)) {
+					hasTargetHitGroundMap.set(target, true);
+					hasTargetHitBall.set(target, true);
+
+					if(Math.round(Math.random()*10) % 2 == 0){
+						bounce1.play();
+					}	
+					else{
+						bounce2.play();
+					}
+					
+					setTimeout(function() {
+						scene.remove(target); 
+						byetarget.play();
+						currentScore += 100;
+						updateScore();
+					}, 2000);
+				}
+			}
+
+			//If target is hit by ball, remove both target and ball and add 300 to score,
+			//then update score
+			if (o.name == 'Ball'){
+				if(!hasTargetHitBall.get(target)) {
+					hasTargetHitBall.set(target, true);
+					hasTargetHitGroundMap.set(target, true);
+					hasBallHitGroundMap.set(ball, true);
+					
+					if(Math.round(Math.random()*10) % 2 == 0){
+						hit1.play();
+					}
+					else{
+						hit2.play();
+					}
+
+					setTimeout(function() {
+						scene.remove(ball); 
+						ballLaunched = false;
+						scene.remove(target);
+						byetarget.play();
+
+						currentScore += 300;
+						updateScore();
+					}, 2000);
+				}
+			}
+
+			//If target hits a wall, play a sound
+			if(o.name == "Wall"){
+				
+				if(Math.round(Math.random()*10) % 2 == 0){
+					knock1.play();
+				}
+				else{
+					knock2.play();
+				}
+			}
+		});
+
+		target.receiveShadow = true;
+		target.castShadow = true;
+
+		pillarstarget.push(target);
+		scene.add(target);
+	}
+	
+	
+	window.onload = init;
+</script>
+
+<title> Beach Bounce </title>
+
+<div class="transbox">
+	<div> Welcome to <strong>Beach Bounce</strong>!</div>
+	<div> Hit the Beach Balls to get points! Knock them to the ground to get points too! </br></br></div>
+	<div> Controls: </div>
+	<div> W: Move Cannon Up </div>
+	<div> S: Move Cannon Down </div>
+	<div> A: Move Cannon Left </div>
+	<div> D: Move Cannon Right </div>
+	<div> F: Fire Cannonball </div>
+	<div> R: Reset </div>
+	<div> M: Toggle Music </div>
+	<div> 1, 2, 3: Change Camera Angle </br></br></div>
+	<div> Game by: Neil Tobin Napase </div>
+</div>
+
+<div class="scorebox">
+	<div> Score:  <span class="red" id="score">0</span></div>
+	<div> High Score:  <span class="red" id="highScore">0</span></div>
+</div>
+
+</body>
+
+</html>
